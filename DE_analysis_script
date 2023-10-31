@@ -1,0 +1,86 @@
+
+#DEG analysis in R
+library(edgeR)
+library(limma)
+library(Glimma)
+library(gplots)
+library(RColorBrewer)
+library(EnhancedVolcano)
+library(pheatmap)
+
+# Read the sample and data information
+sampleinfo<- read.table("samples.csv", header=TRUE, sep=",",row.names=1)
+sampleinfo
+countdata <- read.table("counts.txt", header=TRUE, sep="\t", row.names=1)
+countdata
+
+#Filter counts using "Conts Per Million"
+colSums(countdata)/1e6
+myCPM <- cpm(countdata)
+mylogCPM <- cpm(countdata, log = TRUE)
+
+thresh <- myCPM > 0.5
+table(rowSums(thresh))
+keep <- rowSums(thresh) >= 2
+counts.keep <- countdata[keep,]
+summary(keep)
+dim(counts.keep)
+filteredCPM <- cpm(counts.keep, log=TRUE)
+
+#Convert counts to DGEList object
+dgeObj <- DGEList(counts.keep)
+names(dgeObj)
+dgeObj$samples
+dgeObj$samples$lib.size
+#the distributions of the raw counts we need to log the counts. 
+logcounts <- cpm(dgeObj,log=TRUE)
+
+#Another alternative is to generate an interactive MDS plot using the Glimma package. 
+#labels <- paste(sampleinfo$condition)
+#group <- paste(sampleinfo$condition)
+#group <- factor(group)
+#glMDSPlot(dgeObj, labels=labels, main="Genotype", groups=group, folder="mds")
+
+#Normalisation 
+dgeObj <- calcNormFactors(dgeObj, method="TMM")
+dgeObj$samples
+#Differential expression with limma-voom
+#group <- paste(sampleinfo$condition,sampleinfo$Status,sep=".")
+group <- paste(sampleinfo$condition)
+group <- factor(group)
+group
+# Specify a design matrix without an intercept term
+design <- model.matrix(~ 0 + group)
+colnames(design) <- levels(group)
+design
+#Voom transform the data
+par(mfrow=c(1,1))
+v <- voom(dgeObj,design,plot = TRUE)
+v
+#Testing for differential expression (limma)
+# Fit the linear model
+fit <- lmFit(v)
+names(fit)
+
+cont.matrix <- makeContrasts(Genotype= KO - WT,levels=design)
+cont.matrix
+fit.cont <- contrasts.fit(fit, cont.matrix)
+fit.cont <- eBayes(fit.cont)
+fit.cont
+dim(fit.cont)
+summa.fit <- decideTests(fit.cont)
+summary(summa.fit)
+
+limma.res <- topTable(fit.cont,coef="Genotype",sort.by="p",n="Inf")
+
+write.csv(limma.res,file="all_miRNAs.csv",row.names=TRUE)
+
+data<-as.data.frame(read.csv("all_miRNAs.csv"))
+
+EnhancedVolcano(data, lab = NA, 
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = .05, FCcutoff = 0.584962, 
+                xlim = c(-5,5), ylim = c(0,10), 
+                title = "WT-SH vs. KO-SH", subtitle = "Volcano Plot", 
+                colAlpha = 1, pointSize = 3.0,
+                caption = "")
